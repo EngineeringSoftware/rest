@@ -1,0 +1,18 @@
+# ============================================================================
+# dbt-fusion Record & Replay — Artifact Evaluation
+# ============================================================================
+# No external database needed — uses embedded DuckDB.
+#
+# Usage:
+#   docker compose -f artifact/docker-compose.yml up --build
+# ============================================================================
+
+services:
+  artifact:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./output:/output
+    environment:
+      ARTIFACT_OUTPUT_DIR: /output

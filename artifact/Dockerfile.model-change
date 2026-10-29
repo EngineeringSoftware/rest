@@ -1,0 +1,53 @@
+# ============================================================================
+# dbt-fusion Record & Replay (R&R) — Artifact Evaluation + model changes
+# ============================================================================
+# Same image as ./Dockerfile, plus two scenarios run after the base experiment
+# (run_model_change.sh):
+#   1. record → change a model → replay            (expect replay to FAIL)
+#   2. record → change a model → re-record → replay (expect replay to SUCCEED)
+# Caches (target/, logs/, ~/.cache/com.getdbt) are cleared and DuckDB is reset
+# to the seed snapshot before every dbt run.
+#
+# Usage:
+#   docker build -f artifact/Dockerfile.model-change -t dbt-rr-model-change artifact/
+#   docker run --rm -v $(pwd)/artifact/output-model-change:/output dbt-rr-model-change
+# Base results land in artifact/output-model-change/, scenarios in its model_change/.
+# ============================================================================
+
+FROM ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl jq sqlite3 python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /artifact
+
+# ── Install dbt-fusion from CDN ─────────────────────────────────────────
+ARG DBT_VERSION=2.0.0-preview.172
+ARG TARGET=x86_64-unknown-linux-gnu
+
+RUN set -eux; \
+    url="https://public.cdn.getdbt.com/fs/cli/fs-v${DBT_VERSION}-${TARGET}.tar.gz"; \
+    echo "Downloading dbt-fusion ${DBT_VERSION} from ${url}"; \
+    curl -fsSL "$url" | tar xz -C /usr/local/bin; \
+    dbt --version
+
+# ── Copy jaffle_shop project ────────────────────────────────────────────
+COPY jaffle_shop /artifact/jaffle_shop
+
+# ── Copy artifact scripts & config ──────────────────────────────────────
+COPY profiles.yml          /artifact/profiles.yml
+COPY run_experiment.sh     /artifact/run_experiment.sh
+COPY analyze_recordings.py /artifact/analyze_recordings.py
+COPY run_model_change.sh   /artifact/run_model_change.sh
+COPY model_change_trace.py /artifact/model_change_trace.py
+
+RUN chmod +x /artifact/run_experiment.sh /artifact/run_model_change.sh
+
+ENV ARTIFACT_OUTPUT_DIR=/output
+
+# Base experiment first (it wipes /output), then the model-change scenarios.
+# The container's exit code is the scenarios' verdict: 0 = both as expected.
+ENTRYPOINT ["/bin/bash", "-c", "/artifact/run_experiment.sh; exec /artifact/run_model_change.sh"]
